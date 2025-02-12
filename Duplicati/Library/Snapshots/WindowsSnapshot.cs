@@ -1,28 +1,30 @@
-﻿#region Disclaimer / License
-// Copyright (C) 2015, The Duplicati Team
-// http://www.duplicati.com, info@duplicati.com
-//
-// This library is free software; you can redistribute it and/or
-// modify it under the terms of the GNU Lesser General Public
-// License as published by the Free Software Foundation; either
-// version 2.1 of the License, or (at your option) any later version.
-//
-// This library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-// Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public
-// License along with this library; if not, write to the Free Software
-// Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
-//
-#endregion
+// Copyright (C) 2025, The Duplicati Team
+// https://duplicati.com, hello@duplicati.com
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a 
+// copy of this software and associated documentation files (the "Software"), 
+// to deal in the Software without restriction, including without limitation 
+// the rights to use, copy, modify, merge, publish, distribute, sublicense, 
+// and/or sell copies of the Software, and to permit persons to whom the 
+// Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in 
+// all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+// DEALINGS IN THE SOFTWARE.
+
 
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-
+using System.Runtime.Versioning;
 using Duplicati.Library.Common.IO;
 
 namespace Duplicati.Library.Snapshots
@@ -34,12 +36,18 @@ namespace Duplicati.Library.Snapshots
     /// The class presents all files and folders with their regular filenames to the caller,
     /// and internally handles the conversion to the shadow path.
     /// </summary>
+    [SupportedOSPlatform("windows")]
     public sealed class WindowsSnapshot : SnapshotBase
     {
-		/// <summary>
+        /// <summary>
         /// The tag used for logging messages
         /// </summary>
-		public static readonly string LOGTAG = Logging.Log.LogTagFromType<WindowsSnapshot>();
+        public static readonly string LOGTAG = Logging.Log.LogTagFromType<WindowsSnapshot>();
+
+        /// <summary>
+        /// The system IO for the current platform
+        /// </summary>
+        private static readonly ISystemIO IO_WIN = SystemIO.IO_OS;
 
         /// <summary>
         /// The main reference to the backup controller
@@ -76,7 +84,7 @@ namespace Duplicati.Library.Snapshots
                 _vssBackupComponents.MapVolumesToSnapShots();
 
                 //If we should map the drives, we do that now and update the volumeMap
-                if (Utility.Utility.ParseBoolOption(options, "vss-use-mapping"))
+                if (Utility.Utility.ParseBoolOption(options.AsReadOnly(), "vss-use-mapping"))
                 {
                     _vssBackupComponents.MapDrives();
                 }
@@ -91,9 +99,9 @@ namespace Duplicati.Library.Snapshots
                 {
                     Dispose();
                 }
-				catch(Exception ex2)
+                catch (Exception ex2)
                 {
-					Logging.Log.WriteVerboseMessage(LOGTAG, "VSSCleanupOnError", ex2, "Failed during VSS error cleanup");
+                    Logging.Log.WriteVerboseMessage(LOGTAG, "VSSCleanupOnError", ex2, "Failed during VSS error cleanup");
                 }
 
                 throw;
@@ -112,8 +120,8 @@ namespace Duplicati.Library.Snapshots
         {
             string[] tmp = null;
             var spath = ConvertToSnapshotPath(localFolderPath);
-            tmp = SystemIO.IO_WIN.GetDirectories(spath); 
-            var root = Util.AppendDirSeparator(SystemIO.IO_WIN.GetPathRoot(localFolderPath));
+            tmp = IO_WIN.GetDirectories(spath);
+            var root = Util.AppendDirSeparator(IO_WIN.GetPathRoot(localFolderPath));
             var volumePath = Util.AppendDirSeparator(ConvertToSnapshotPath(root));
             volumePath = SystemIOWindows.AddExtendedDevicePathPrefix(volumePath);
 
@@ -137,10 +145,10 @@ namespace Duplicati.Library.Snapshots
 
             string[] files = null;
             var spath = ConvertToSnapshotPath(localFolderPath);
-            files = SystemIO.IO_WIN.GetFiles(spath);
+            files = IO_WIN.GetFiles(spath);
 
             // convert back to non-shadow, i.e., non-vss version
-            var root = Util.AppendDirSeparator(SystemIO.IO_WIN.GetPathRoot(localFolderPath));
+            var root = Util.AppendDirSeparator(IO_WIN.GetPathRoot(localFolderPath));
             var volumePath = Util.AppendDirSeparator(ConvertToSnapshotPath(root));
             volumePath = SystemIOWindows.AddExtendedDevicePathPrefix(volumePath);
 
@@ -176,7 +184,7 @@ namespace Duplicati.Library.Snapshots
         {
             var spath = ConvertToSnapshotPath(localPath);
 
-            return SystemIO.IO_WIN.GetLastWriteTimeUtc(SystemIOWindows.AddExtendedDevicePathPrefix(spath));
+            return IO_WIN.GetLastWriteTimeUtc(SystemIOWindows.AddExtendedDevicePathPrefix(spath));
         }
 
         /// <summary>
@@ -188,7 +196,7 @@ namespace Duplicati.Library.Snapshots
         {
             var spath = ConvertToSnapshotPath(localPath);
 
-            return SystemIO.IO_WIN.GetCreationTimeUtc(SystemIOWindows.AddExtendedDevicePathPrefix(spath));
+            return IO_WIN.GetCreationTimeUtc(SystemIOWindows.AddExtendedDevicePathPrefix(spath));
         }
 
         /// <summary>
@@ -198,7 +206,7 @@ namespace Duplicati.Library.Snapshots
         /// <returns>An open filestream that can be read</returns>
         public override Stream OpenRead(string localPath)
         {
-            return SystemIO.IO_WIN.FileOpenRead(ConvertToSnapshotPath(localPath));
+            return IO_WIN.FileOpenRead(ConvertToSnapshotPath(localPath));
         }
 
         /// <summary>
@@ -208,7 +216,7 @@ namespace Duplicati.Library.Snapshots
         /// <returns>The length of the file</returns>
         public override long GetFileSize(string localPath)
         {
-            return SystemIO.IO_WIN.FileLength(ConvertToSnapshotPath(localPath));
+            return IO_WIN.FileLength(ConvertToSnapshotPath(localPath));
         }
 
         /// <summary>
@@ -218,7 +226,7 @@ namespace Duplicati.Library.Snapshots
         /// <param name="localPath">The file or folder to examine</param>
         public override FileAttributes GetAttributes(string localPath)
         {
-            return SystemIO.IO_WIN.GetFileAttributes(ConvertToSnapshotPath(localPath));
+            return IO_WIN.GetFileAttributes(ConvertToSnapshotPath(localPath));
         }
 
         /// <summary>
@@ -229,7 +237,7 @@ namespace Duplicati.Library.Snapshots
         public override string GetSymlinkTarget(string localPath)
         {
             var spath = ConvertToSnapshotPath(localPath);
-            return SystemIO.IO_WIN.GetSymlinkTarget(spath);
+            return IO_WIN.GetSymlinkTarget(spath);
         }
 
         /// <summary>
@@ -241,7 +249,7 @@ namespace Duplicati.Library.Snapshots
         /// <param name="followSymlink">A flag indicating if a symlink should be followed</param>
         public override Dictionary<string, string> GetMetadata(string localPath, bool isSymlink, bool followSymlink)
         {
-            return SystemIO.IO_WIN.GetMetadata(ConvertToSnapshotPath(localPath), isSymlink, followSymlink);
+            return IO_WIN.GetMetadata(ConvertToSnapshotPath(localPath), isSymlink, followSymlink);
         }
 
         /// <inheritdoc />
@@ -264,8 +272,8 @@ namespace Duplicati.Library.Snapshots
 
             foreach (var kvp in _vssBackupComponents.SnapshotDeviceAndVolumes)
             {
-				if (snapshotPath.StartsWith(kvp.Key, Utility.Utility.ClientFilenameStringComparison))
-                    return SystemIO.IO_WIN.PathCombine(kvp.Value, snapshotPath.Substring(kvp.Key.Length));
+                if (snapshotPath.StartsWith(kvp.Key, Utility.Utility.ClientFilenameStringComparison))
+                    return IO_WIN.PathCombine(kvp.Value, snapshotPath.Substring(kvp.Key.Length));
             }
 
             throw new InvalidOperationException();
@@ -280,7 +288,7 @@ namespace Duplicati.Library.Snapshots
             if (!Path.IsPathRooted(localPath))
                 throw new InvalidOperationException();
 
-            var root = SystemIO.IO_WIN.GetPathRoot(localPath);
+            var root = IO_WIN.GetPathRoot(localPath);
             var volumePath = _vssBackupComponents.GetVolumeFromCache(root);
 
             // Note that using a simple Path.Combine() for the following code
@@ -300,13 +308,13 @@ namespace Duplicati.Library.Snapshots
         /// <inheritdoc />
         public override bool FileExists(string localFilePath)
         {
-            return SystemIO.IO_WIN.FileExists(ConvertToSnapshotPath(localFilePath));
+            return IO_WIN.FileExists(ConvertToSnapshotPath(localFilePath));
         }
 
         /// <inheritdoc />
         public override bool DirectoryExists(string localFolderPath)
         {
-            return SystemIO.IO_WIN.DirectoryExists(ConvertToSnapshotPath(localFolderPath));
+            return IO_WIN.DirectoryExists(ConvertToSnapshotPath(localFolderPath));
         }
 
         /// <inheritdoc />
@@ -319,7 +327,7 @@ namespace Duplicati.Library.Snapshots
         {
             if (disposing)
             {
-                _vssBackupComponents.Dispose();
+                _vssBackupComponents?.Dispose();
             }
 
             base.Dispose(disposing);

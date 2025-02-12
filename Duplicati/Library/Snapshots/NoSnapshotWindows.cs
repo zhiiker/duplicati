@@ -1,23 +1,28 @@
-//  Copyright (C) 2015, The Duplicati Team
+// Copyright (C) 2025, The Duplicati Team
+// https://duplicati.com, hello@duplicati.com
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a 
+// copy of this software and associated documentation files (the "Software"), 
+// to deal in the Software without restriction, including without limitation 
+// the rights to use, copy, modify, merge, publish, distribute, sublicense, 
+// and/or sell copies of the Software, and to permit persons to whom the 
+// Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in 
+// all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+// DEALINGS IN THE SOFTWARE.
 
-//  http://www.duplicati.com, info@duplicati.com
-//
-//  This library is free software; you can redistribute it and/or modify
-//  it under the terms of the GNU Lesser General Public License as
-//  published by the Free Software Foundation; either version 2.1 of the
-//  License, or (at your option) any later version.
-//
-//  This library is distributed in the hope that it will be useful, but
-//  WITHOUT ANY WARRANTY; without even the implied warranty of
-//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-//  Lesser General Public License for more details.
-//
-//  You should have received a copy of the GNU Lesser General Public
-//  License along with this library; if not, write to the Free Software
-//  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Versioning;
 using Duplicati.Library.Common.IO;
 
 namespace Duplicati.Library.Snapshots
@@ -25,8 +30,14 @@ namespace Duplicati.Library.Snapshots
     /// <summary>
     /// Handler for providing a snapshot like access to files and folders
     /// </summary>
+    [SupportedOSPlatform("windows")]
     public sealed class NoSnapshotWindows : SnapshotBase
     {
+        /// <summary>
+        /// The system IO implementation for Windows
+        /// </summary>
+        private static readonly ISystemIO IO_WIN = SystemIO.IO_OS;
+
         /// <summary>
         /// Returns the symlink target if the entry is a symlink, and null otherwise
         /// </summary>
@@ -34,7 +45,7 @@ namespace Duplicati.Library.Snapshots
         /// <returns>The symlink target</returns>
         public override string GetSymlinkTarget(string localPath)
         {
-            return SystemIO.IO_WIN.GetSymlinkTarget(localPath);
+            return IO_WIN.GetSymlinkTarget(localPath);
         }
 
         /// <summary>
@@ -42,9 +53,9 @@ namespace Duplicati.Library.Snapshots
         /// </summary>
         /// <returns>The file attributes</returns>
         /// <param name="localPath">The file or folder to examine</param>
-        public override System.IO.FileAttributes GetAttributes (string localPath)
+        public override System.IO.FileAttributes GetAttributes(string localPath)
         {
-            return SystemIO.IO_WIN.GetFileAttributes(localPath);
+            return IO_WIN.GetFileAttributes(localPath);
         }
 
         /// <summary>
@@ -52,9 +63,9 @@ namespace Duplicati.Library.Snapshots
         /// </summary>
         /// <param name="localPath">The full path to the file in non-snapshot format</param>
         /// <returns>The length of the file</returns>
-        public override long GetFileSize (string localPath)
+        public override long GetFileSize(string localPath)
         {
-            return SystemIO.IO_WIN.FileLength(localPath);
+            return IO_WIN.FileLength(localPath);
         }
 
         /// <summary>
@@ -74,9 +85,9 @@ namespace Duplicati.Library.Snapshots
         /// </summary>
         /// <param name="localPath">The full path to the file in non-snapshot format</param>
         /// <returns>The last write time of the file</returns>
-        public override DateTime GetLastWriteTimeUtc (string localPath)
+        public override DateTime GetLastWriteTimeUtc(string localPath)
         {
-            return SystemIO.IO_WIN.FileGetLastWriteTimeUtc(localPath);
+            return IO_WIN.FileGetLastWriteTimeUtc(localPath);
         }
 
         /// <summary>
@@ -84,9 +95,9 @@ namespace Duplicati.Library.Snapshots
         /// </summary>
         /// <param name="localPath">The full path to the file in non-snapshot format</param>
         /// <returns>The last write time of the file</returns>
-        public override DateTime GetCreationTimeUtc (string localPath)
+        public override DateTime GetCreationTimeUtc(string localPath)
         {
-            return SystemIO.IO_WIN.FileGetCreationTimeUtc(localPath);
+            return IO_WIN.FileGetCreationTimeUtc(localPath);
         }
 
         /// <summary>
@@ -94,9 +105,9 @@ namespace Duplicati.Library.Snapshots
         /// </summary>
         /// <param name="localPath">The full path to the file in non-snapshot format</param>
         /// <returns>An open filestream that can be read</returns>
-        public override System.IO.Stream OpenRead (string localPath)
+        public override System.IO.Stream OpenRead(string localPath)
         {
-            return SystemIO.IO_WIN.FileOpenRead(localPath);
+            return IO_WIN.FileOpenRead(localPath);
         }
 
         /// <summary>
@@ -104,25 +115,25 @@ namespace Duplicati.Library.Snapshots
         /// </summary>
         /// <returns>All folders found in the folder</returns>
         /// <param name='localFolderPath'>The folder to examinate</param>
-        protected override string[] ListFiles (string localFolderPath)
+        protected override string[] ListFiles(string localFolderPath)
         {
-            string[] tmp = SystemIO.IO_WIN.GetFiles(localFolderPath);
+            string[] tmp = IO_WIN.GetFiles(localFolderPath);
             string[] res = new string[tmp.Length];
-            for(int i = 0; i < tmp.Length; i++)
+            for (int i = 0; i < tmp.Length; i++)
                 res[i] = SystemIOWindows.RemoveExtendedDevicePathPrefix(tmp[i]);
 
             return res;
         }
 
-        
+
         /// <summary>
         /// Lists all folders in the given folder
         /// </summary>
         /// <returns>All folders found in the folder</returns>
         /// <param name='localFolderPath'>The folder to examinate</param>
-        protected override string[] ListFolders (string localFolderPath)
+        protected override string[] ListFolders(string localFolderPath)
         {
-            string[] tmp = SystemIO.IO_WIN.GetDirectories(SystemIOWindows.AddExtendedDevicePathPrefix(localFolderPath));
+            string[] tmp = IO_WIN.GetDirectories(SystemIOWindows.AddExtendedDevicePathPrefix(localFolderPath));
             string[] res = new string[tmp.Length];
             for (int i = 0; i < tmp.Length; i++)
                 res[i] = SystemIOWindows.RemoveExtendedDevicePathPrefix(tmp[i]);
@@ -139,7 +150,7 @@ namespace Duplicati.Library.Snapshots
         /// <param name="followSymlink">A flag indicating if a symlink should be followed</param>
         public override Dictionary<string, string> GetMetadata(string localPath, bool isSymlink, bool followSymlink)
         {
-            return SystemIO.IO_WIN.GetMetadata(localPath, isSymlink, followSymlink);
+            return IO_WIN.GetMetadata(localPath, isSymlink, followSymlink);
         }
 
         /// <inheritdoc />
