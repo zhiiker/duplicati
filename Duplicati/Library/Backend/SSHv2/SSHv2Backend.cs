@@ -1,44 +1,46 @@
-﻿#region Disclaimer / License
+// Copyright (C) 2025, The Duplicati Team
+// https://duplicati.com, hello@duplicati.com
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a 
+// copy of this software and associated documentation files (the "Software"), 
+// to deal in the Software without restriction, including without limitation 
+// the rights to use, copy, modify, merge, publish, distribute, sublicense, 
+// and/or sell copies of the Software, and to permit persons to whom the 
+// Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in 
+// all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+// DEALINGS IN THE SOFTWARE.
 
-// Copyright (C) 2015, The Duplicati Team
-// http://www.duplicati.com, info@duplicati.com
-// 
-// This library is free software; you can redistribute it and/or
-// modify it under the terms of the GNU Lesser General Public
-// License as published by the Free Software Foundation; either
-// version 2.1 of the License, or (at your option) any later version.
-// 
-// This library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-// Lesser General Public License for more details.
-// 
-// You should have received a copy of the GNU Lesser General Public
-// License along with this library; if not, write to the Free Software
-// Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
-// 
-
-#endregion
 
 using Duplicati.Library.Common.IO;
 using Duplicati.Library.Interface;
+using Duplicati.Library.SourceProvider;
 using Renci.SshNet;
 using Renci.SshNet.Common;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Security.Cryptography;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Duplicati.Library.Backend
 {
-    public class SSHv2 : IStreamingBackend, IRenameEnabledBackend
+    public class SSHv2 : IStreamingBackend, IRenameEnabledBackend, IFolderEnabledBackend
     {
         private const string SSH_KEYFILE_OPTION = "ssh-keyfile";
         private const string SSH_KEYFILE_INLINE = "ssh-key";
         private const string SSH_FINGERPRINT_OPTION = "ssh-fingerprint";
+        private const string SSH_RELATIVE_PATH_OPTION = "ssh-relative-path";
         private const string SSH_FINGERPRINT_ACCEPT_ANY_OPTION = "ssh-accept-any-fingerprints";
         public const string KEYFILE_URI = "sshkey://";
         private const string SSH_TIMEOUT_OPTION = "ssh-operation-timeout";
@@ -56,30 +58,10 @@ namespace Duplicati.Library.Backend
         private readonly TimeSpan m_keepaliveinterval;
 
         private readonly int m_port = 22;
+        private readonly bool m_useRelativePath;
+        private string m_initialDirectory;
 
         private SftpClient m_con;
-
-        private static readonly bool supportsECDSA;
-
-        static SSHv2()
-        {
-            // SSH.NET relies on the System.Security.Cryptography.ECDsaCng class for
-            // ECDSA algorithms, which is not implemented in Mono (as of 6.12.0.144).
-            // This prevents clients from connecting if one of the ECDSA algorithms is
-            // chosen as the host key algorithm.  In this case, we will prevent the
-            // client from advertising support for ECDSA algorithms.
-            //
-            // See https://github.com/mono/mono/blob/mono-6.12.0.144/mcs/class/referencesource/System.Core/System/Security/Cryptography/ECDsaCng.cs.
-            try
-            {
-                ECDsaCng unused = new ECDsaCng();
-                SSHv2.supportsECDSA = true;
-            }
-            catch
-            {
-                SSHv2.supportsECDSA = false;
-            }
-        }
 
         public SSHv2()
         {
@@ -104,6 +86,7 @@ namespace Duplicati.Library.Backend
                 m_password = uri.Password;
 
             m_fingerprintallowall = Utility.Utility.ParseBoolOption(options, SSH_FINGERPRINT_ACCEPT_ANY_OPTION);
+            m_useRelativePath = Utility.Utility.ParseBoolOption(options, SSH_RELATIVE_PATH_OPTION);
 
             m_path = uri.Path;
 
@@ -112,8 +95,15 @@ namespace Duplicati.Library.Backend
                 m_path = Util.AppendDirSeparator(m_path, "/");
             }
 
-            if (!m_path.StartsWith("/", StringComparison.Ordinal))
-                m_path = "/" + m_path;
+            if (m_useRelativePath)
+            {
+                m_path = m_path.TrimStart('/');
+            }
+            else
+            {
+                if (!m_path.StartsWith("/", StringComparison.Ordinal))
+                    m_path = "/" + m_path;
+            }
 
             m_server = uri.Host;
 
@@ -134,22 +124,20 @@ namespace Duplicati.Library.Backend
 
         #region IBackend Members
 
-        public void Test()
-        {
-            this.TestList();
-        }
+        public Task TestAsync(CancellationToken cancelToken)
+            => this.TestListAsync(cancelToken);
 
-        public void CreateFolder()
+        public async Task CreateFolderAsync(CancellationToken cancelToken)
         {
-            CreateConnection();
+            await CreateConnection(cancelToken).ConfigureAwait(false);
 
             // Since the SftpClient.CreateDirectory method does not create all the parent directories
             // as needed, this has to be done manually.
-            string partialPath = String.Empty;
+            var partialPath = string.Empty;
             foreach (string part in m_path.Split('/').Where(x => !String.IsNullOrEmpty(x)))
             {
                 partialPath += $"/{part}";
-                if (this.m_con.Exists(partialPath))
+                if (await this.m_con.ExistsAsync(partialPath, cancelToken))
                 {
                     if (!this.m_con.GetAttributes(partialPath).IsDirectory)
                     {
@@ -158,9 +146,10 @@ namespace Duplicati.Library.Backend
                 }
                 else
                 {
-                    this.m_con.CreateDirectory(partialPath);
+                    await this.m_con.CreateDirectoryAsync(partialPath, cancelToken).ConfigureAwait(false);
                 }
             }
+
         }
 
         public string DisplayName => Strings.SSHv2Backend.DisplayName;
@@ -171,23 +160,23 @@ namespace Duplicati.Library.Backend
         {
             using (System.IO.FileStream fs = System.IO.File.Open(filename, System.IO.FileMode.Open,
                 System.IO.FileAccess.Read, System.IO.FileShare.Read))
-                await PutAsync(remotename, fs, cancelToken);
+                await PutAsync(remotename, fs, cancelToken).ConfigureAwait(false);
         }
 
-        public void Get(string remotename, string filename)
+        public async Task GetAsync(string remotename, string filename, CancellationToken cancelToken)
         {
-            using (System.IO.FileStream fs = System.IO.File.Open(filename, System.IO.FileMode.Create,
+            using (var fs = System.IO.File.Open(filename, System.IO.FileMode.Create,
                 System.IO.FileAccess.Write, System.IO.FileShare.None))
-                Get(remotename, fs);
+                await GetAsync(remotename, fs, cancelToken).ConfigureAwait(false);
         }
 
-        public void Delete(string remotename)
+        public async Task DeleteAsync(string remotename, CancellationToken cancelToken)
         {
             try
             {
-                CreateConnection();
-                ChangeDirectory(m_path);
-                m_con.DeleteFile(remotename);
+                await CreateConnection(cancelToken).ConfigureAwait(false);
+                await SetWorkingDirectory(cancelToken).ConfigureAwait(false);
+                await m_con.DeleteFileAsync(remotename, cancelToken).ConfigureAwait(false);
             }
             catch (SftpPathNotFoundException ex)
             {
@@ -225,6 +214,9 @@ namespace Duplicati.Library.Backend
                     new CommandLineArgument(SSH_KEEPALIVE_OPTION, CommandLineArgument.ArgumentType.Timespan,
                         Strings.SSHv2Backend.DescriptionSshkeepaliveShort,
                         Strings.SSHv2Backend.DescriptionSshkeepaliveLong, "0"),
+                    new CommandLineArgument(SSH_RELATIVE_PATH_OPTION, CommandLineArgument.ArgumentType.Boolean,
+                        Strings.SSHv2Backend.DescriptionRelativePathShort,
+                        Strings.SSHv2Backend.DescriptionRelativePathLong)
                 });
             }
         }
@@ -259,44 +251,57 @@ namespace Duplicati.Library.Backend
 
         #region IStreamingBackend Implementation
 
-        public Task PutAsync(string remotename, System.IO.Stream stream, CancellationToken cancelToken)
+        public async Task PutAsync(string remotename, System.IO.Stream stream, CancellationToken cancelToken)
         {
-            CreateConnection();
-            ChangeDirectory(m_path);
-            m_con.UploadFile(stream, remotename);
-            return Task.FromResult(true);
+            await CreateConnection(cancelToken).ConfigureAwait(false);
+            await SetWorkingDirectory(cancelToken).ConfigureAwait(false);
+            await Task.Factory.FromAsync(
+                (cb, state) => m_con.BeginUploadFile(stream, remotename, cb, state, _ => cancelToken.ThrowIfCancellationRequested()),
+                m_con.EndUploadFile,
+                null);
         }
 
-        public void Get(string remotename, System.IO.Stream stream)
+        public async Task GetAsync(string remotename, System.IO.Stream stream, CancellationToken cancelToken)
         {
-            CreateConnection();
-            ChangeDirectory(m_path);
-            m_con.DownloadFile(remotename, stream);
+            await CreateConnection(cancelToken).ConfigureAwait(false);
+            await SetWorkingDirectory(cancelToken).ConfigureAwait(false);
+
+            try
+            {
+                await Task.Factory.FromAsync(
+                    (cb, state) => m_con.BeginDownloadFile(remotename, stream, cb, state, _ => cancelToken.ThrowIfCancellationRequested()),
+                    m_con.EndDownloadFile,
+                    null).ConfigureAwait(false);
+            }
+            catch (SftpPathNotFoundException ex)
+            {
+                throw new FileMissingException(ex);
+            }
         }
 
         #endregion
 
         #region IRenameEnabledBackend Implementation
 
-        public void Rename(string source, string target)
+        public async Task RenameAsync(string source, string target, CancellationToken cancelToken)
         {
-            CreateConnection();
-            ChangeDirectory(m_path);
-            m_con.RenameFile(source, target);
+            await CreateConnection(cancelToken).ConfigureAwait(false);
+            await SetWorkingDirectory(cancelToken).ConfigureAwait(false);
+            await m_con.RenameFileAsync(source, target, cancelToken).ConfigureAwait(false);
         }
 
         #endregion
 
         #region Implementation
 
-        private void CreateConnection()
+        private async Task CreateConnection(CancellationToken cancelToken)
         {
             if (m_con != null && m_con.IsConnected)
                 return;
 
             if (m_con != null && !m_con.IsConnected)
             {
-                this.TryConnect(m_con);
+                await this.TryConnect(m_con, cancelToken).ConfigureAwait(false);
                 return;
             }
 
@@ -351,57 +356,55 @@ namespace Duplicati.Library.Backend
             if (m_keepaliveinterval.Ticks != 0)
                 con.KeepAliveInterval = m_keepaliveinterval;
 
-            this.TryConnect(con);
+            await this.TryConnect(con, cancelToken).ConfigureAwait(false);
+            if (m_useRelativePath && (string.IsNullOrWhiteSpace(con.WorkingDirectory) || !con.WorkingDirectory.StartsWith("/")))
+                throw new UserInformationException("Server does not report absolute initial directory, please switch to absolute paths", "RelativePathNotSupported");
+            m_initialDirectory = con.WorkingDirectory;
 
             m_con = con;
         }
 
-        private void TryConnect(SftpClient client)
-        {
-            if (!SSHv2.supportsECDSA)
-            {
-                List<string> ecdsaKeys = client.ConnectionInfo.HostKeyAlgorithms.Keys.Where(x => x.StartsWith("ecdsa")).ToList();
-                foreach (string key in ecdsaKeys)
-                {
-                    client.ConnectionInfo.HostKeyAlgorithms.Remove(key);
-                }
-            }
+        private Task TryConnect(SftpClient client, CancellationToken cancelToken)
+            => client.ConnectAsync(cancelToken);
 
-            client.Connect();
-        }
-
-        private void ChangeDirectory(string path)
+        private async Task SetWorkingDirectory(CancellationToken cancelToken)
         {
-            if (string.IsNullOrEmpty(path))
+            if (string.IsNullOrEmpty(m_path))
                 return;
 
+            var targetPath = m_useRelativePath
+                ? Util.AppendDirSeparator(m_initialDirectory, "/") + m_path
+                : m_path;
+
             var workingDir = Util.AppendDirSeparator(m_con.WorkingDirectory, "/");
-            if (workingDir == path)
+            if (workingDir == targetPath)
                 return;
 
             try
             {
-                m_con.ChangeDirectory(path);
+                await m_con.ChangeDirectoryAsync(targetPath, cancelToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 throw new Interface.FolderMissingException(
-                    Strings.SSHv2Backend.FolderNotFoundManagedError(path, ex.Message), ex);
+                    Strings.SSHv2Backend.FolderNotFoundManagedError(m_path, ex.Message), ex);
             }
         }
 
-        public IEnumerable<IFileEntry> List()
+        /// <inheritdoc />
+        public async IAsyncEnumerable<IFileEntry> ListAsync([EnumeratorCancellation] CancellationToken cancelToken)
         {
-            string path = ".";
+            var path = ".";
 
-            CreateConnection();
-            ChangeDirectory(m_path);
+            await CreateConnection(cancelToken).ConfigureAwait(false);
+            await SetWorkingDirectory(cancelToken).ConfigureAwait(false);
 
-            foreach (var ls in m_con.ListDirectory(path))
+            await foreach (var ls in m_con.ListDirectoryAsync(path, cancelToken).ConfigureAwait(false))
             {
                 if (ls.Name.ToString() == "." || ls.Name.ToString() == "..") continue;
                 yield return new FileEntry(ls.Name, ls.Length,
-                    ls.LastAccessTime, ls.LastWriteTime) {IsFolder = ls.Attributes.IsDirectory};
+                    ls.LastAccessTime, ls.LastWriteTime)
+                { IsFolder = ls.Attributes.IsDirectory };
             }
         }
 
@@ -411,7 +414,7 @@ namespace Duplicati.Library.Backend
             {
                 if (!filename.StartsWith(KEYFILE_URI, StringComparison.OrdinalIgnoreCase))
                 {
-                    return String.IsNullOrEmpty(password)
+                    return string.IsNullOrEmpty(password)
                         ? new PrivateKeyFile(filename)
                         : new PrivateKeyFile(filename, password);
                 }
@@ -424,7 +427,7 @@ namespace Duplicati.Library.Backend
 
                     ms.Position = 0;
 
-                    return String.IsNullOrEmpty(password) ? new PrivateKeyFile(ms) : new PrivateKeyFile(ms, password);
+                    return string.IsNullOrEmpty(password) ? new PrivateKeyFile(ms) : new PrivateKeyFile(ms, password);
                 }
             }
             catch (Exception ex)
@@ -443,9 +446,38 @@ namespace Duplicati.Library.Backend
             get { return m_con; }
         }
 
-        public string[] DNSName
+        public Task<string[]> GetDNSNamesAsync(CancellationToken cancelToken) => Task.FromResult(new[] { m_server });
+
+        /// <inheritdoc/>
+        public async IAsyncEnumerable<IFileEntry> ListAsync(string path, [EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            get { return new[] {m_server}; }
+            await CreateConnection(cancellationToken).ConfigureAwait(false);
+            await SetWorkingDirectory(cancellationToken).ConfigureAwait(false);
+
+            var prefixPath = m_useRelativePath ? "" : m_path;
+            if (!string.IsNullOrWhiteSpace(prefixPath))
+                prefixPath = Util.AppendDirSeparator(prefixPath, "/");
+
+            var filterPath = prefixPath + BackendSourceFileEntry.NormalizePathTo(path, '/');
+            if (!string.IsNullOrWhiteSpace(filterPath))
+                filterPath = Util.AppendDirSeparator(filterPath, "/");
+
+            if (string.IsNullOrWhiteSpace(filterPath))
+                filterPath = ".";
+
+            await foreach (var x in Client.ListDirectoryAsync(filterPath, cancellationToken).ConfigureAwait(false))
+                yield return new FileEntry(
+                    x.Name,
+                    x.Attributes.Size,
+                    x.Attributes.LastAccessTimeUtc,
+                    x.Attributes.LastWriteTimeUtc)
+                {
+                    IsFolder = x.Attributes.IsDirectory
+                };
         }
+
+        /// <inheritdoc/>
+        public Task<IFileEntry> GetEntryAsync(string path, CancellationToken cancellationToken)
+            => Task.FromResult<IFileEntry>(null);
     }
 }

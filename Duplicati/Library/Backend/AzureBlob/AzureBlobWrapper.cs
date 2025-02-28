@@ -1,26 +1,27 @@
-#region Disclaimer / License
-// Copyright (C) 2015, The Duplicati Team
-// http://www.duplicati.com, info@duplicati.com
+// Copyright (C) 2025, The Duplicati Team
+// https://duplicati.com, hello@duplicati.com
 // 
-// This library is free software; you can redistribute it and/or
-// modify it under the terms of the GNU Lesser General Public
-// License as published by the Free Software Foundation; either
-// version 2.1 of the License, or (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a 
+// copy of this software and associated documentation files (the "Software"), 
+// to deal in the Software without restriction, including without limitation 
+// the rights to use, copy, modify, merge, publish, distribute, sublicense, 
+// and/or sell copies of the Software, and to permit persons to whom the 
+// Software is furnished to do so, subject to the following conditions:
 // 
-// This library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-// Lesser General Public License for more details.
+// The above copyright notice and this permission notice shall be included in 
+// all copies or substantial portions of the Software.
 // 
-// You should have received a copy of the GNU Lesser General Public
-// License along with this library; if not, write to the Free Software
-// Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
-// 
-#endregion
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+// DEALINGS IN THE SOFTWARE.
 
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Duplicati.Library.Common.IO;
@@ -38,6 +39,10 @@ namespace Duplicati.Library.Backend.AzureBlob
     {
         private readonly string _containerName;
         private readonly CloudBlobContainer _container;
+        private readonly OperationContext _operationContext;
+
+        // Note: May need metadata; need to test with Azure blobs
+        private const BlobListingDetails ListDetails = BlobListingDetails.None;
 
         public string[] DnsNames
         {
@@ -64,13 +69,13 @@ namespace Duplicati.Library.Backend.AzureBlob
 
         public AzureBlobWrapper(string accountName, string accessKey, string sasToken, string containerName)
         {
-            OperationContext.GlobalSendingRequest += (sender, args) =>
+            _operationContext = new()
             {
-                args.Request.UserAgent = string.Format(
+                CustomUserAgent = string.Format(
                     "APN/1.0 Duplicati/{0} AzureBlob/2.0 {1}",
                     System.Reflection.Assembly.GetExecutingAssembly().GetName().Version,
                     Microsoft.WindowsAzure.Storage.Shared.Protocol.Constants.HeaderConstants.UserAgent
-                );
+            )
             };
 
             string connectionString;
@@ -92,57 +97,33 @@ namespace Duplicati.Library.Backend.AzureBlob
             _container = blobClient.GetContainerReference(containerName);
         }
 
-        public void AddContainer()
+        public async Task AddContainerAsync(CancellationToken cancellationToken)
         {
-            _container.Create(BlobContainerPublicAccessType.Off);
+            await _container.CreateAsync(default, default, _operationContext, cancellationToken).ConfigureAwait(false);
+            await _container.SetPermissionsAsync(new BlobContainerPermissions { PublicAccess = BlobContainerPublicAccessType.Off }, default, default, _operationContext, cancellationToken).ConfigureAwait(false);
         }
 
-        public virtual void GetFileStream(string keyName, Stream target)
+        public virtual Task GetFileStreamAsync(string keyName, Stream target, CancellationToken cancellationToken)
         {
-            _container.GetBlockBlobReference(keyName).DownloadToStream(target);
+            return _container.GetBlockBlobReference(keyName).DownloadToStreamAsync(target, default, default, _operationContext, cancellationToken);
         }
 
-        public virtual async Task AddFileStream(string keyName, Stream source, CancellationToken cancelToken)
+        public virtual Task AddFileStream(string keyName, Stream source, CancellationToken cancelToken)
         {
-            await _container.GetBlockBlobReference(keyName).UploadFromStreamAsync(source, cancelToken);
+            return _container.GetBlockBlobReference(keyName).UploadFromStreamAsync(source, source.Length, default, default, _operationContext, cancelToken);
         }
 
-        public void DeleteObject(string keyName)
+        public Task DeleteObjectAsync(string keyName, CancellationToken cancelToken)
         {
-            _container.GetBlockBlobReference(keyName).DeleteIfExists();
+            return _container.GetBlockBlobReference(keyName).DeleteIfExistsAsync(default, default, default, _operationContext, cancelToken);
         }
 
-        public virtual List<IFileEntry> ListContainerEntries()
+        private async IAsyncEnumerable<IListBlobItem> ListContainerBlobEntriesAsync([EnumeratorCancellation] CancellationToken cancelToken)
         {
-            var listBlobItems = _container.ListBlobs(blobListingDetails: BlobListingDetails.Metadata);
+            BlobResultSegment segment;
             try
             {
-                return listBlobItems.Select(x =>
-                {
-                    var absolutePath = x.StorageUri.PrimaryUri.AbsolutePath;
-                    var containerSegment = string.Concat("/", _containerName, "/");
-                    var blobName = absolutePath.Substring(absolutePath.IndexOf(
-                        containerSegment, System.StringComparison.Ordinal) + containerSegment.Length);
-
-                    try
-                    {
-                        if (x is CloudBlockBlob cb)
-                        {
-                            var lastModified = new System.DateTime();
-                            if (cb.Properties.LastModified != null)
-                                lastModified = new System.DateTime(cb.Properties.LastModified.Value.Ticks, System.DateTimeKind.Utc);
-                            return new FileEntry(Uri.UrlDecode(blobName.Replace("+", "%2B")), cb.Properties.Length, lastModified, lastModified);
-                        }
-                    }
-                    catch
-                    {
-                        // If the metadata fails to parse, return the basic entry
-                    }
-
-                    return new FileEntry(Uri.UrlDecode(blobName.Replace("+", "%2B")));
-                })
-                .Cast<IFileEntry>()
-                .ToList();
+                segment = await _container.ListBlobsSegmentedAsync(null, false, ListDetails, null, null, null, _operationContext, cancelToken).ConfigureAwait(false);
             }
             catch (StorageException ex)
             {
@@ -151,6 +132,46 @@ namespace Duplicati.Library.Backend.AzureBlob
                     throw new FolderMissingException(ex);
                 }
                 throw;
+            }
+
+            foreach (var item in segment.Results)
+                yield return item;
+
+            while (segment.ContinuationToken != null)
+            {
+                segment = await _container.ListBlobsSegmentedAsync(null, false, ListDetails, null, segment.ContinuationToken, null, _operationContext, cancelToken).ConfigureAwait(false);
+
+                foreach (var item in segment.Results)
+                    yield return item;
+            }
+        }
+
+        public virtual async IAsyncEnumerable<IFileEntry> ListContainerEntriesAsync([EnumeratorCancellation] CancellationToken cancelToken)
+        {
+            await foreach (var x in ListContainerBlobEntriesAsync(cancelToken).ConfigureAwait(false))
+            {
+                var absolutePath = x.StorageUri.PrimaryUri.AbsolutePath;
+                var containerSegment = string.Concat("/", _containerName, "/");
+                var blobName = absolutePath.Substring(absolutePath.IndexOf(
+                    containerSegment, System.StringComparison.Ordinal) + containerSegment.Length);
+
+                var res = new FileEntry(Uri.UrlDecode(blobName.Replace("+", "%2B")));
+                try
+                {
+                    if (x is CloudBlockBlob cb)
+                    {
+                        var lastModified = new System.DateTime();
+                        if (cb.Properties.LastModified != null)
+                            lastModified = new System.DateTime(cb.Properties.LastModified.Value.Ticks, System.DateTimeKind.Utc);
+                        res = new FileEntry(res.Name, cb.Properties.Length, lastModified, lastModified);
+                    }
+                }
+                catch
+                {
+                    // If the metadata fails to parse, return the basic entry
+                }
+
+                yield return res;
             }
         }
     }

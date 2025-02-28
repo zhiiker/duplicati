@@ -1,10 +1,32 @@
-﻿using Duplicati.Library.Common.IO;
+// Copyright (C) 2025, The Duplicati Team
+// https://duplicati.com, hello@duplicati.com
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a 
+// copy of this software and associated documentation files (the "Software"), 
+// to deal in the Software without restriction, including without limitation 
+// the rights to use, copy, modify, merge, publish, distribute, sublicense, 
+// and/or sell copies of the Software, and to permit persons to whom the 
+// Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in 
+// all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+// DEALINGS IN THE SOFTWARE.
+using Duplicati.Library.Common.IO;
 using Duplicati.Library.Interface;
 using Duplicati.Library.Utility;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -40,7 +62,7 @@ namespace Duplicati.Library.Backend.Sia
 
             m_redundancy = 1.5F;
             if (options.ContainsKey(SIA_REDUNDANCY))
-                m_redundancy = float.Parse(options[SIA_REDUNDANCY]);
+                m_redundancy = (float)decimal.Parse(options[SIA_REDUNDANCY], CultureInfo.InvariantCulture);
 
             if (m_apiport <= 0)
                 m_apiport = 9980;
@@ -49,8 +71,8 @@ namespace Duplicati.Library.Backend.Sia
             {
                 m_targetpath = options[SIA_TARGETPATH];
             }
-            while(m_targetpath.Contains("//"))
-                m_targetpath = m_targetpath.Replace("//","/");
+            while (m_targetpath.Contains("//"))
+                m_targetpath = m_targetpath.Replace("//", "/");
             while (m_targetpath.StartsWith("/", StringComparison.Ordinal))
                 m_targetpath = m_targetpath.Substring(1);
             while (m_targetpath.EndsWith("/", StringComparison.Ordinal))
@@ -140,19 +162,22 @@ namespace Duplicati.Library.Backend.Sia
             public SiaDownloadFile[] Files { get; set; }
         }
 
-        private SiaFileList GetFiles()
+        private async Task<SiaFileList> GetFiles(CancellationToken cancelToken)
         {
+            // Remove warning until this is rewritten to use HttpClient
+            await Task.CompletedTask;
+
             var fl = new SiaFileList();
-            string endpoint = "/renter/files";
+            var endpoint = "/renter/files";
 
             try
             {
-                System.Net.HttpWebRequest req = CreateRequest(endpoint);
+                var req = CreateRequest(endpoint);
                 req.Method = System.Net.WebRequestMethods.Http.Get;
 
-                Utility.AsyncHttpRequest areq = new Utility.AsyncHttpRequest(req);
+                var areq = new Utility.AsyncHttpRequest(req);
 
-                using (System.Net.HttpWebResponse resp = (System.Net.HttpWebResponse)areq.GetResponse())
+                using (var resp = (System.Net.HttpWebResponse)areq.GetResponse())
                 {
                     int code = (int)resp.StatusCode;
                     if (code < 200 || code >= 300)
@@ -175,9 +200,9 @@ namespace Duplicati.Library.Backend.Sia
             return fl;
         }
 
-        private bool IsUploadComplete(string siafilename)
+        private async Task<bool> IsUploadComplete(string siafilename, CancellationToken cancelToken)
         {
-            SiaFileList fl = GetFiles();
+            var fl = await GetFiles(cancelToken).ConfigureAwait(false);
             if (fl.Files == null)
                 return false;
 
@@ -264,14 +289,13 @@ namespace Duplicati.Library.Backend.Sia
 
         #region IBackend Members
 
-        public void Test()
-        {
-            this.TestList();
-        }
+        public Task TestAsync(CancellationToken cancelToken)
+            => this.TestListAsync(cancelToken);
 
-        public void CreateFolder()
+        public Task CreateFolderAsync(CancellationToken cancelToken)
         {
             // Dummy method, Sia doesn't have folders
+            return Task.CompletedTask;
         }
 
         public string DisplayName
@@ -283,17 +307,18 @@ namespace Duplicati.Library.Backend.Sia
         {
             get { return "sia"; }
         }
-        
-        public IEnumerable<IFileEntry> List()
+
+        /// <inheritdoc />
+        public async IAsyncEnumerable<IFileEntry> ListAsync([EnumeratorCancellation] CancellationToken cancelToken)
         {
             SiaFileList fl;
             try
             {
-                fl = GetFiles();
+                fl = await GetFiles(cancelToken).ConfigureAwait(false);
             }
             catch (System.Net.WebException wex)
             {
-                throw new Exception("failed to call /renter/files "+wex.Message);
+                throw new Exception("failed to call /renter/files " + wex.Message);
             }
 
             if (fl.Files != null)
@@ -315,44 +340,41 @@ namespace Duplicati.Library.Backend.Sia
             }
         }
 
-        public Task PutAsync(string remotename, string filename, CancellationToken cancelToken)
+        public async Task PutAsync(string remotename, string filename, CancellationToken cancelToken)
         {
-            string endpoint ="";
-            string siafile = m_targetpath + "/" + remotename;
+            var endpoint = "";
+            var siafile = m_targetpath + "/" + remotename;
 
-            try {
+            try
+            {
                 endpoint = string.Format("/renter/upload/{0}/{1}?source={2}",
-                    m_targetpath, 
+                    m_targetpath,
                     Utility.Uri.UrlEncode(remotename).Replace("+", "%20"),
                     Utility.Uri.UrlEncode(filename).Replace("+", "%20")
                 );
 
-                HttpWebRequest req = CreateRequest(endpoint);
+                var req = CreateRequest(endpoint);
                 req.Method = WebRequestMethods.Http.Post;
 
-                AsyncHttpRequest areq = new AsyncHttpRequest(req);
+                var areq = new AsyncHttpRequest(req);
 
-                using (HttpWebResponse resp = (HttpWebResponse)areq.GetResponse())
+                using (var resp = (HttpWebResponse)areq.GetResponse())
                 {
                     int code = (int)resp.StatusCode;
                     if (code < 200 || code >= 300)
                         throw new WebException(resp.StatusDescription, null, WebExceptionStatus.ProtocolError, resp);
 
-                    while (! IsUploadComplete( siafile ))
-                    {
-                        Thread.Sleep(5000);
-                    }
+                    while (!await IsUploadComplete(siafile, cancelToken).ConfigureAwait(false))
+                        await Task.Delay(5000, cancelToken).ConfigureAwait(false);
                 }
             }
             catch (WebException wex)
             {
                 throw new Exception(getResponseBodyOnError(endpoint, wex));
             }
-
-            return Task.FromResult(true);
         }
 
-        public void Get(string remotename, string localname)
+        public async Task GetAsync(string remotename, string localname, CancellationToken cancelToken)
         {
             string endpoint = "";
             string siafile = m_targetpath + "/" + remotename;
@@ -377,15 +399,14 @@ namespace Duplicati.Library.Backend.Sia
                         throw new System.Net.WebException(resp.StatusDescription, null, System.Net.WebExceptionStatus.ProtocolError, resp);
 
                     while (!IsDownloadComplete(siafile, localname))
-                    {
-                        System.Threading.Thread.Sleep(5000);
-                    }
-                   
+                        await Task.Delay(5000, cancelToken).ConfigureAwait(false);
+
                     System.IO.File.Copy(tmpfilename, localname, true);
                     try
                     {
                         System.IO.File.Delete(tmpfilename);
-                    } catch (Exception)
+                    }
+                    catch (Exception)
                     {
 
                     }
@@ -400,7 +421,7 @@ namespace Duplicati.Library.Backend.Sia
             }
         }
 
-        public void Delete(string remotename)
+        public Task DeleteAsync(string remotename, CancellationToken cancellationToken)
         {
             string endpoint = "";
 
@@ -429,18 +450,20 @@ namespace Duplicati.Library.Backend.Sia
                 else
                     throw new Exception(getResponseBodyOnError(endpoint, wex));
             }
+
+            return Task.CompletedTask;
         }
 
 
         public IList<ICommandLineArgument> SupportedCommands
         {
             get
-            {    
-                return new List<ICommandLineArgument>(new ICommandLineArgument[] {
+            {
+                return new List<ICommandLineArgument>([
                     new CommandLineArgument(SIA_TARGETPATH, CommandLineArgument.ArgumentType.String, Strings.Sia.SiaPathDescriptionShort, Strings.Sia.SiaPathDescriptionLong, "/backup"),
                     new CommandLineArgument(SIA_PASSWORD, CommandLineArgument.ArgumentType.Password, Strings.Sia.SiaPasswordShort, Strings.Sia.SiaPasswordLong, null),
-                    new CommandLineArgument(SIA_REDUNDANCY, CommandLineArgument.ArgumentType.String, Strings.Sia.SiaRedundancyDescriptionShort, Strings.Sia.SiaRedundancyDescriptionLong, "1.5"),
-                });
+                    new CommandLineArgument(SIA_REDUNDANCY, CommandLineArgument.ArgumentType.Decimal, Strings.Sia.SiaRedundancyDescriptionShort, Strings.Sia.SiaRedundancyDescriptionLong, "1.5"),
+                ]);
             }
         }
 
@@ -452,10 +475,7 @@ namespace Duplicati.Library.Backend.Sia
             }
         }
 
-        public string[] DNSName
-        {
-            get { return new string[] { new System.Uri(m_apihost).Host }; }
-        }
+        public Task<string[]> GetDNSNamesAsync(CancellationToken cancelToken) => Task.FromResult(new[] { new System.Uri(m_apihost).Host });
 
         #endregion
 

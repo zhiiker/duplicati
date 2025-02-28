@@ -1,19 +1,24 @@
-﻿//  Copyright (C) 2015, The Duplicati Team
-//  http://www.duplicati.com, info@duplicati.com
-//
-//  This library is free software; you can redistribute it and/or modify
-//  it under the terms of the GNU Lesser General Public License as
-//  published by the Free Software Foundation; either version 2.1 of the
-//  License, or (at your option) any later version.
-//
-//  This library is distributed in the hope that it will be useful, but
-//  WITHOUT ANY WARRANTY; without even the implied warranty of
-//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-//  Lesser General Public License for more details.
-//
-//  You should have received a copy of the GNU Lesser General Public
-//  License along with this library; if not, write to the Free Software
-//  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+// Copyright (C) 2025, The Duplicati Team
+// https://duplicati.com, hello@duplicati.com
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a 
+// copy of this software and associated documentation files (the "Software"), 
+// to deal in the Software without restriction, including without limitation 
+// the rights to use, copy, modify, merge, publish, distribute, sublicense, 
+// and/or sell copies of the Software, and to permit persons to whom the 
+// Software is furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in 
+// all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+// DEALINGS IN THE SOFTWARE.
+
 using System;
 using System.Collections.Generic;
 using Duplicati.Library.Interface;
@@ -22,12 +27,12 @@ using System.IO;
 using Duplicati.Library.Utility;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
-using Duplicati.Library.Strings;
 using System.Net;
 using System.Text;
 using Duplicati.Library.Common.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Runtime.CompilerServices;
 
 namespace Duplicati.Library.Backend.OpenStack
 {
@@ -71,7 +76,11 @@ namespace Duplicati.Library.Backend.OpenStack
             new KeyValuePair<string, string>("Infomaniak Swiss Backup cluster 1", "https://swiss-backup.infomaniak.com/identity/v3"),
             new KeyValuePair<string, string>("Infomaniak Swiss Backup cluster 2", "https://swiss-backup02.infomaniak.com/identity/v3"),
             new KeyValuePair<string, string>("Infomaniak Swiss Backup cluster 3", "https://swiss-backup03.infomaniak.com/identity/v3"),
+            new KeyValuePair<string, string>("Infomaniak Swiss Backup cluster 4", "https://swiss-backup04.infomaniak.com/identity/v3"),
             new KeyValuePair<string, string>("Infomaniak Public Cloud 1", "https://api.pub1.infomaniak.cloud/identity/v3"),
+            new KeyValuePair<string, string>("Infomaniak Public Cloud 2", "https://api.pub2.infomaniak.cloud/identity/v3"),
+            new KeyValuePair<string, string>("Catalyst Cloud - nz-hlz-1 (NZ)", "https://api.nz-hlz-1.catalystcloud.io:5000/v3"),
+            new KeyValuePair<string, string>("Catalyst Cloud - nz-por-1 (NZ)", "https://api.nz-por-1.catalystcloud.io:5000/v3"),
         };
 
         public static readonly KeyValuePair<string, string>[] OPENSTACK_VERSIONS = {
@@ -90,7 +99,7 @@ namespace Duplicati.Library.Backend.OpenStack
 
             public class Identity
             {
-                [JsonProperty(ItemConverterType=typeof(StringEnumConverter))]
+                [JsonProperty(ItemConverterType = typeof(StringEnumConverter))]
                 public IdentityMethods[] methods { get; set; }
 
                 [JsonProperty("password", NullValueHandling = NullValueHandling.Ignore)]
@@ -98,7 +107,7 @@ namespace Duplicati.Library.Backend.OpenStack
 
                 public Identity()
                 {
-                    this.methods = new [] { IdentityMethods.password };
+                    this.methods = new[] { IdentityMethods.password };
                 }
             }
 
@@ -145,7 +154,8 @@ namespace Duplicati.Library.Backend.OpenStack
                 }
             }
 
-            public class Project {
+            public class Project
+            {
                 public Domain domain { get; set; }
                 public string name { get; set; }
 
@@ -165,7 +175,7 @@ namespace Duplicati.Library.Backend.OpenStack
                 this.auth = new AuthContainer();
                 this.auth.identity = new Identity();
                 this.auth.identity.PasswordCredentials = new PasswordBasedRequest();
-                this.auth.identity.PasswordCredentials.user = new UserCredentials(domain,username,password);
+                this.auth.identity.PasswordCredentials.user = new UserCredentials(domain, username, password);
                 this.auth.scope = new Scope();
                 this.auth.scope.project = new Project(domain, project_name);
             }
@@ -346,6 +356,9 @@ namespace Duplicati.Library.Backend.OpenStack
             if (string.IsNullOrWhiteSpace(m_authUri))
                 throw new UserInformationException(Strings.OpenStack.MissingOptionError(AUTHURI_OPTION), "OpenStackMissingAuthUri");
 
+            if (string.IsNullOrWhiteSpace(m_version) && m_authUri.EndsWith("/v3", StringComparison.OrdinalIgnoreCase))
+                m_version = "v3";
+
             switch (m_version)
             {
                 case "v3":
@@ -354,7 +367,7 @@ namespace Duplicati.Library.Backend.OpenStack
                     if (string.IsNullOrWhiteSpace(m_domainName))
                         throw new UserInformationException(Strings.OpenStack.MissingOptionError(DOMAINNAME_OPTION), "OpenStackMissingDomainName");
                     if (string.IsNullOrWhiteSpace(m_tenantName))
-                        throw new UserInformationException(Strings.OpenStack.MissingOptionError(TENANTNAME_OPTION), "OpenStackMissingTenantName");    
+                        throw new UserInformationException(Strings.OpenStack.MissingOptionError(TENANTNAME_OPTION), "OpenStackMissingTenantName");
                     break;
                 case "v2":
                 default:
@@ -377,8 +390,8 @@ namespace Duplicati.Library.Backend.OpenStack
             {
                 if (m_accessToken == null || (m_accessToken.expires.HasValue && (m_accessToken.expires.Value - DateTime.UtcNow).TotalSeconds < 30))
                     GetAuthResponse();
-                
-                return m_accessToken.id;                    
+
+                return m_accessToken.id;
             }
         }
 
@@ -418,7 +431,7 @@ namespace Duplicati.Library.Backend.OpenStack
                 JsonConvert.SerializeObject(
                     new Keystone3AuthRequest(m_domainName, m_username, m_password, m_tenantName)
                 ));
-            
+
             req.ContentLength = data.Length;
             req.ContentType = "application/json; charset=UTF-8";
 
@@ -443,7 +456,7 @@ namespace Duplicati.Library.Backend.OpenStack
             var fileservice = resp.token.catalog.FirstOrDefault(x => string.Equals(x.type, "object-store", StringComparison.OrdinalIgnoreCase));
             if (fileservice == null)
                 throw new Exception("No object-store service found, is this service supported by the provider?");
-            
+
             var endpoint = fileservice.endpoints.FirstOrDefault(x => (string.Equals(m_region, x.region) && string.Equals(x.interface_name, "public", StringComparison.OrdinalIgnoreCase))) ?? fileservice.endpoints.First();
             m_simplestorageendpoint = endpoint.url;
 
@@ -492,21 +505,21 @@ namespace Duplicati.Library.Backend.OpenStack
         public async Task PutAsync(string remotename, Stream stream, CancellationToken cancelToken)
         {
             var url = JoinUrls(SimpleStorageEndPoint, m_container, Utility.Uri.UrlPathEncode(m_prefix + remotename));
-            using(await m_helper.GetResponseAsync(url, cancelToken, stream, "PUT"))
+            using (await m_helper.GetResponseAsync(url, cancelToken, stream, "PUT").ConfigureAwait(false))
             { }
         }
 
-        public void Get(string remotename, Stream stream)
+        public async Task GetAsync(string remotename, Stream stream, CancellationToken cancelToken)
         {
             var url = JoinUrls(SimpleStorageEndPoint, m_container, Utility.Uri.UrlPathEncode(m_prefix + remotename));
 
             try
             {
-                using(var resp = m_helper.GetResponse(url))
-                using(var rs = AsyncHttpRequest.TrySetTimeout(resp.GetResponseStream()))
-                    Library.Utility.Utility.CopyStream(rs, stream);
+                using (var resp = m_helper.GetResponse(url))
+                using (var rs = AsyncHttpRequest.TrySetTimeout(resp.GetResponseStream()))
+                    await Library.Utility.Utility.CopyStreamAsync(rs, stream, cancelToken).ConfigureAwait(false);
             }
-            catch(WebException wex)
+            catch (WebException wex)
             {
                 if (wex.Response is HttpWebResponse response && response.StatusCode == HttpStatusCode.NotFound)
                     throw new FileMissingException();
@@ -518,11 +531,11 @@ namespace Duplicati.Library.Backend.OpenStack
         #endregion
         #region IBackend implementation
 
-        private T HandleListExceptions<T>(Func<T> func)
+        private async Task<T> HandleListExceptions<T>(Func<Task<T>> func)
         {
             try
             {
-                return func();
+                return await func().ConfigureAwait(false);
             }
             catch (WebException wex)
             {
@@ -533,7 +546,8 @@ namespace Duplicati.Library.Backend.OpenStack
             }
         }
 
-        public IEnumerable<IFileEntry> List()
+        /// <inheritdoc />
+        public async IAsyncEnumerable<IFileEntry> ListAsync([EnumeratorCancellation] CancellationToken cancelToken)
         {
             var plainurl = JoinUrls(SimpleStorageEndPoint, m_container) + string.Format("?format=json&delimiter=/&limit={0}", PAGE_LIMIT);
             if (!string.IsNullOrEmpty(m_prefix))
@@ -546,7 +560,7 @@ namespace Duplicati.Library.Backend.OpenStack
                 var req = m_helper.CreateRequest(url);
                 req.Accept = "application/json";
 
-                var items = HandleListExceptions(() => m_helper.ReadJSONResponse<OpenStackStorageItem[]>(req));
+                var items = await HandleListExceptions(() => m_helper.ReadJSONResponseAsync<OpenStackStorageItem[]>(req, cancelToken)).ConfigureAwait(false);
                 foreach (var n in items)
                 {
                     var name = n.name;
@@ -575,24 +589,23 @@ namespace Duplicati.Library.Backend.OpenStack
                 await PutAsync(remotename, fs, cancelToken);
         }
 
-        public void Get(string remotename, string filename)
+        public async Task GetAsync(string remotename, string filename, CancellationToken cancelToken)
         {
             using (FileStream fs = File.Create(filename))
-                Get(remotename, fs);
+                await GetAsync(remotename, fs, cancelToken).ConfigureAwait(false);
         }
-        public void Delete(string remotename)
+        public Task DeleteAsync(string remotename, CancellationToken cancelToken)
         {
             var url = JoinUrls(SimpleStorageEndPoint, m_container, Library.Utility.Uri.UrlPathEncode(m_prefix + remotename));
-            m_helper.ReadJSONResponse<object>(url, null, "DELETE");
+            return m_helper.ReadJSONResponseAsync<object>(url, cancelToken, null, "DELETE");
         }
-        public void Test()
-        {
-            this.TestList();
-        }
-        public void CreateFolder()
+        public Task TestAsync(CancellationToken cancelToken)
+            => this.TestListAsync(cancelToken);
+
+        public async Task CreateFolderAsync(CancellationToken cancelToken)
         {
             var url = JoinUrls(SimpleStorageEndPoint, m_container);
-            using(m_helper.GetResponse(url, null, "PUT"))
+            using (await m_helper.GetResponseAsync(url, cancelToken, null, "PUT").ConfigureAwait(false))
             { }
         }
         public string DisplayName
@@ -614,10 +627,10 @@ namespace Duplicati.Library.Backend.OpenStack
             get
             {
                 var authuris = new StringBuilder();
-                foreach(var s in KNOWN_OPENSTACK_PROVIDERS)
+                foreach (var s in KNOWN_OPENSTACK_PROVIDERS)
                     authuris.AppendLine(string.Format("{0}: {1}", s.Key, s.Value));
 
-                return new List<ICommandLineArgument>(new [] {
+                return new List<ICommandLineArgument>(new[] {
                     new CommandLineArgument(DOMAINNAME_OPTION, CommandLineArgument.ArgumentType.String, Strings.OpenStack.DomainnameOptionShort, Strings.OpenStack.DomainnameOptionLong),
                     new CommandLineArgument(USERNAME_OPTION, CommandLineArgument.ArgumentType.String, Strings.OpenStack.UsernameOptionShort, Strings.OpenStack.UsernameOptionLong),
                     new CommandLineArgument(PASSWORD_OPTION, CommandLineArgument.ArgumentType.Password, Strings.OpenStack.PasswordOptionShort, Strings.OpenStack.PasswordOptionLong(TENANTNAME_OPTION)),
@@ -637,16 +650,10 @@ namespace Duplicati.Library.Backend.OpenStack
             }
         }
 
-        public virtual string[] DNSName
-        {
-            get 
-            { 
-                return new string[] { 
-                    new System.Uri(m_authUri).Host, 
-                    string.IsNullOrWhiteSpace(m_simplestorageendpoint) ? null : new System.Uri(m_simplestorageendpoint).Host 
-                }; 
-            }
-        }
+        public Task<string[]> GetDNSNamesAsync(CancellationToken cancelToken) => Task.FromResult(new[] {
+            new System.Uri(m_authUri).Host,
+            string.IsNullOrWhiteSpace(m_simplestorageendpoint) ? null : new System.Uri(m_simplestorageendpoint).Host
+        });
 
         #endregion
         #region IDisposable implementation
